@@ -9,6 +9,7 @@ import { config } from "process";
 import { join } from "path";
 import path from "path";
 import { bundlerModuleNameResolver } from "typescript";
+import { randomBytes } from "crypto";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -56,12 +57,13 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
 
   let ba = Buffer.from(ab);
 
-  let assetPath = path.join(cfg.assetsRoot,`${videoId}.${thumbnail.type}`);
+  let tempBuffer = randomBytes(32).toString("base64");
+
+  let assetPath = path.join(cfg.assetsRoot,`${tempBuffer}.${thumbnail.type}`);
 
   await Bun.write(assetPath, ba);
 
   video.thumbnailURL = `http://localhost:${cfg.port}/${assetPath}`;
-  console.log(video.thumbnailURL);
 
   updateVideo(cfg.db, video);
 
