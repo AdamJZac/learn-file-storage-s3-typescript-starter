@@ -3,7 +3,7 @@ import { type ApiConfig } from "../config";
 import { readableStreamToText, S3Client, type BunRequest } from "bun";
 import { getBearerToken, validateJWT } from "../auth";
 import { BadRequestError, UserForbiddenError } from "./errors";
-import { getVideo, updateVideo } from "../db/videos";
+import { getVideo, updateVideo, type Video } from "../db/videos";
 import path from "path";
 import { randomBytes } from "crypto";
 
@@ -44,15 +44,18 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   let assetPath = path.join(cfg.assetsRoot,`${videoId}.${data.type.split("/")[1]}`);
   
   await Bun.write(assetPath, data);
-  let bunFile = Bun.file(assetPath, {type: "video/mp4"});
-  let ar = await getVideoAspectRatio(assetPath);
+  let processedAssetPath = await processVideoForFastStart(assetPath);
+  await Bun.file(assetPath).delete();
+  let bunFile = Bun.file(processedAssetPath, {type: "video/mp4"});
+  let ar = await getVideoAspectRatio(processedAssetPath);
 
-  let s3Key = `${ar}${randomBytes(32).toString("hex")}.mp4`;
+  let s3Key = `${ar}${randomBytes(32).toString("hex")}-processed.mp4`;
   let s3 = cfg.s3Client;
-  let s3File = await s3.write(s3Key, bunFile, {type: "video/mp4"});
+  await s3.write(s3Key, bunFile, {type: "video/mp4"});
 
-  let vidUrl = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${s3Key}`;
-  video.videoURL = vidUrl;
+  //let vidUrl = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${s3Key}`;
+
+  video.videoURL = s3Key;
   updateVideo(cfg.db, video);
 
   await bunFile.delete();
@@ -101,5 +104,33 @@ function getAspectCategory(width: number, height: number): string {
   }
 
   return "other";
+}
+
+async function processVideoForFastStart(inputFilePath: string) {
+  let outputPath = `${inputFilePath.slice(0,inputFilePath.length-4)}-processed.mp4`;
+  const sp = Bun.spawn({
+    cmd: ["ffmpeg","-i",inputFilePath,"-movflags","faststart","-map_metadata","0","-codec","copy","-f","mp4", outputPath],
+     stdout: "pipe",
+     stderr: "pipe"
+    });
+
+    let code = await sp.exited;
+
+    if (code !== 0) {
+      throw new Error(`Error reading file with ffmpeg ${code}`);
+    }
+
+    return outputPath;
+}
+
+function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
+  const s3 = cfg.s3Client;
+  const file = s3.file(key);
+  return file.presign({expiresIn: expireTime});
+}
+
+export function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
+  video.videoURL = generatePresignedURL(cfg, (video.videoURL as string), 3600);
+  return video;
 }
 
