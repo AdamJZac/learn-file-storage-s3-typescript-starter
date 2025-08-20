@@ -53,9 +53,10 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   let s3 = cfg.s3Client;
   await s3.write(s3Key, bunFile, {type: "video/mp4"});
 
-  //let vidUrl = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${s3Key}`;
+  //let bucketVidUrl = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${s3Key}`;
+  let cdnVidUrl = `https://${cfg.s3CfDistribution}/${s3Key}`;
 
-  video.videoURL = s3Key;
+  video.videoURL = cdnVidUrl;
   updateVideo(cfg.db, video);
 
   await bunFile.delete();
@@ -123,13 +124,15 @@ async function processVideoForFastStart(inputFilePath: string) {
     return outputPath;
 }
 
+
+//Deprecated
 function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
   const s3 = cfg.s3Client;
   const file = s3.file(key);
   return file.presign({expiresIn: expireTime});
 }
-
-export function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
+//Deprecated
+function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
   video.videoURL = generatePresignedURL(cfg, (video.videoURL as string), 3600);
   return video;
 }
